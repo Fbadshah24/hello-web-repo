@@ -15,5 +15,5 @@ output "ecr_repo_uri" {
 }
 
 output "cluster_name" {
-  value = aws_eks_cluster.eks_cluster.name
+  value = module.eks_cluster.name
 }
