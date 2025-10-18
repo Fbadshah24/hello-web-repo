@@ -1,0 +1,25 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: hello-web
+  labels:
+    app: hello-web
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: hello-web
+  template:
+    metadata:
+      labels:
+        app: hello-web
+    spec:
+      containers:
+      - name: hello-web
+        image: 314146296094.dkr.ecr.us-east-1.amazonaws.com/hello-web-repo
+        ports:
+        - containerPort: 80
+        resources:
+          limits:
+            cpu: "250m"
+            memory: "128Mi"

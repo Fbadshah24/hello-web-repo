@@ -1,0 +1,88 @@
+pipeline {
+  agent any
+
+  environment {
+    AWS_DEFAULT_REGION = 'us-east-1'
+    TF_DIR = 'terraform'
+  }
+
+  stages {
+    stage('Checkout') {
+      steps {
+        checkout scm
+      }
+    }
+
+    stage('Terraform Init') {
+      steps {
+        dir("${TF_DIR}") {
+          withCredentials([[$class: 'AmazonWebServicesCredentialsBinding', credentialsId: 'aws-credentials']]) {
+            sh 'terraform init -input=false'
+          }
+        }
+      }
+    }
+
+    stage('Terraform Plan') {
+      steps {
+        dir("${TF_DIR}") {
+          withCredentials([[$class: 'AmazonWebServicesCredentialsBinding', credentialsId: 'aws-credentials']]) {
+            sh 'terraform plan -out=tfplan -input=false'
+          }
+        }
+      }
+    }
+
+    stage('Terraform Apply') {
+      steps {
+        dir("${TF_DIR}") {
+          withCredentials([[$class: 'AmazonWebServicesCredentialsBinding', credentialsId: 'aws-credentials']]) {
+            sh 'terraform apply -input=false -auto-approve tfplan'
+          }
+        }
+      }
+    }
+
+    stage('Build and Push Docker Image') {
+      steps {
+        script {
+          IMAGE_TAG = sh(returnStdout: true, script: 'git rev-parse --short HEAD').trim()
+          env.IMAGE_TAG = IMAGE_TAG
+
+          // Retrieve ECR repo URI from Terraform output
+          ECR_REPO = sh(returnStdout: true, script: "cd ${TF_DIR} && terraform output -raw ecr_repo_url").trim()
+          env.ECR_REPO = ECR_REPO
+        }
+
+        sh 'chmod +x jenkins/scripts/aws-ecr-login-and-push.sh'
+        sh "jenkins/scripts/aws-ecr-login-and-push.sh ${ECR_REPO} ${IMAGE_TAG}"
+      }
+    }
+
+    stage('Deploy to Kubernetes (EKS)') {
+      steps {
+        script {
+          // Fetch kubeconfig dynamically using Terraform output (cluster name)
+          CLUSTER_NAME = sh(returnStdout: true, script: "cd ${TF_DIR} && terraform output -raw cluster_name").trim()
+          sh "aws eks update-kubeconfig --region ${AWS_DEFAULT_REGION} --name ${CLUSTER_NAME}"
+        }
+
+        sh "sed -e 's|<ECR_REPOSITORY_URI>|${ECR_REPO}|g' k8s/deployment.yaml | sed -e 's|${IMAGE_TAG_PLACEHOLDER}|${IMAGE_TAG}|g' > k8s/deployment.generated.yaml"
+        sh 'kubectl apply -f k8s/deployment.generated.yaml'
+        sh 'kubectl apply -f k8s/service.yaml'
+      }
+    }
+  }
+
+  post {
+    always {
+      echo '✅ Pipeline finished (success or fail).'
+    }
+    success {
+      echo '🎉 Deployment successful!'
+    }
+    failure {
+      echo '❌ Pipeline failed — check the logs.'
+    }
+  }
+}
