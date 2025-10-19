@@ -1,92 +1,98 @@
 pipeline {
-  agent any
+    agent any
 
-  environment {
-    AWS_DEFAULT_REGION = 'us-east-1'
-    TF_DIR = 'terraform'
-  }
-
-  stages {
-    stage('Checkout') {
-      steps {
-        checkout scm
-      }
+    environment {
+        AWS_DEFAULT_REGION = 'us-east-1'
+        TF_DIR = 'terraform'
     }
 
-    stage('Terraform Init') {
-      steps {
-        dir("${TF_DIR}") {
-          withCredentials([[$class: 'AmazonWebServicesCredentialsBinding', credentialsId: 'aws-credentials']]) {
-            sh 'terraform init -input=false'
-          }
-        }
-      }
-    }
-
-    stage('Terraform Plan') {
-      steps {
-        dir("${TF_DIR}") {
-          withCredentials([[$class: 'AmazonWebServicesCredentialsBinding', credentialsId: 'aws-credentials']]) {
-            sh 'terraform plan -out=tfplan -input=false'
-          }
-        }
-      }
-    }
-
-    stage('Terraform Apply') {
-      steps {
-        dir("${TF_DIR}") {
-          withCredentials([[$class: 'AmazonWebServicesCredentialsBinding', credentialsId: 'aws-credentials']]) {
-            sh 'terraform apply -input=false -auto-approve tfplan'
-          }
-        }
-      }
-    }
-
-    stage('Build and Push Docker Image') {
-      steps {
-        script {
-          def IMAGE_TAG = sh(returnStdout: true, script: 'git rev-parse --short HEAD').trim()
-          env.IMAGE_TAG = IMAGE_TAG
-
-          // Retrieve ECR repo URI from Terraform output
-          def ECR_REPO = sh(returnStdout: true, script: "cd ${TF_DIR} && terraform output -raw ecr_repo_uri").trim()
-          env.ECR_REPO = ECR_REPO
+    stages {
+        stage('Checkout') {
+            steps {
+                checkout scm
+            }
         }
 
-        withCredentials([[$class: 'AmazonWebServicesCredentialsBinding', credentialsId: 'aws-credentials']]) {
-          sh 'chmod +x jenkins/scripts/aws-ecr-login-and-push.sh'
-          sh "jenkins/scripts/aws-ecr-login-and-push.sh ${AWS_ACCESS_KEY_ID} ${AWS_SECRET_ACCESS_KEY} ${AWS_DEFAULT_REGION} ${ECR_REPO} ${IMAGE_TAG}"
+        stage('Terraform Init') {
+            steps {
+                dir("${TF_DIR}") {
+                    withCredentials([[$class: 'AmazonWebServicesCredentialsBinding', credentialsId: 'aws-credentials']]) {
+                        sh 'terraform init -input=false'
+                    }
+                }
+            }
         }
-      }
-    }
 
-    stage('Deploy to Kubernetes (EKS)') {
-      steps {
-        withCredentials([[$class: 'AmazonWebServicesCredentialsBinding', credentialsId: 'aws-credentials']]) {
-          script {
-            // Fetch kubeconfig dynamically using Terraform output (cluster name)
-            def CLUSTER_NAME = sh(returnStdout: true, script: "cd ${TF_DIR} && terraform output -raw cluster_name").trim()
-            sh "aws eks update-kubeconfig --region ${AWS_DEFAULT_REGION} --name ${CLUSTER_NAME}"
-          }
-
-          sh "sed -e 's|<ECR_REPOSITORY_URI>|${ECR_REPO}|g' k8s/deployment.yaml | sed -e 's|\\$IMAGE_TAG_PLACEHOLDER|${IMAGE_TAG}|g' > k8s/deployment.generated.yaml"
-          sh 'kubectl apply -f k8s/deployment.generated.yaml'
-          sh 'kubectl apply -f k8s/service.yaml'
+        stage('Terraform Plan') {
+            steps {
+                dir("${TF_DIR}") {
+                    withCredentials([[$class: 'AmazonWebServicesCredentialsBinding', credentialsId: 'aws-credentials']]) {
+                        sh 'terraform plan -out=tfplan -input=false'
+                    }
+                }
+            }
         }
-      }
-    }
-  }
 
-  post {
-    always {
-      echo '✅ Pipeline finished (success or fail).'
+        stage('Terraform Apply') {
+            steps {
+                dir("${TF_DIR}") {
+                    withCredentials([[$class: 'AmazonWebServicesCredentialsBinding', credentialsId: 'aws-credentials']]) {
+                        sh 'terraform apply -input=false -auto-approve tfplan'
+                    }
+                }
+            }
+        }
+
+        stage('Build and Push Docker Image') {
+            steps {
+                script {
+                    def IMAGE_TAG = sh(returnStdout: true, script: 'git rev-parse --short HEAD').trim()
+                    env.IMAGE_TAG = IMAGE_TAG
+
+                    def ECR_REPO = sh(returnStdout: true, script: "cd ${TF_DIR} && terraform output -raw ecr_repo_uri").trim()
+                    env.ECR_REPO = ECR_REPO
+                }
+
+                withCredentials([[$class: 'AmazonWebServicesCredentialsBinding', credentialsId: 'aws-credentials']]) {
+                    sh 'chmod +x jenkins/scripts/aws-ecr-login-and-push.sh'
+                    sh "jenkins/scripts/aws-ecr-login-and-push.sh ${AWS_ACCESS_KEY_ID} ${AWS_SECRET_ACCESS_KEY} ${AWS_DEFAULT_REGION} ${ECR_REPO} ${IMAGE_TAG}"
+                }
+            }
+        }
+
+        stage('Deploy to Kubernetes (EKS)') {
+            steps {
+                withCredentials([[$class: 'AmazonWebServicesCredentialsBinding', credentialsId: 'aws-credentials']]) {
+                    script {
+                        // Get EKS cluster name from Terraform output
+                        def CLUSTER_NAME = sh(returnStdout: true, script: "cd ${TF_DIR} && terraform output -raw cluster_name").trim()
+                        sh "aws eks update-kubeconfig --region ${AWS_DEFAULT_REGION} --name ${CLUSTER_NAME}"
+
+                        // Replace placeholders in deployment.yaml safely
+                        sh """
+                        sed -e 's|<ECR_REPOSITORY_URI>|${ECR_REPO}|g' \
+                            -e 's|IMAGE_TAG_PLACEHOLDER|${IMAGE_TAG}|g' \
+                            k8s/deployment.yaml > k8s/deployment.generated.yaml
+                        """
+
+                        // Apply Kubernetes manifests
+                        sh 'kubectl apply -f k8s/deployment.generated.yaml'
+                        sh 'kubectl apply -f k8s/service.yaml'
+                    }
+                }
+            }
+        }
     }
-    success {
-      echo '🎉 Deployment successful!'
+
+    post {
+        always {
+            echo '✅ Pipeline finished (success or fail).'
+        }
+        success {
+            echo '🎉 Deployment successful!'
+        }
+        failure {
+            echo '❌ Pipeline failed — check the logs.'
+        }
     }
-    failure {
-      echo '❌ Pipeline failed — check the logs.'
-    }
-  }
 }
