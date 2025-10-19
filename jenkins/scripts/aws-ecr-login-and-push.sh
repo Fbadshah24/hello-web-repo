@@ -22,15 +22,11 @@ aws sts get-caller-identity >/dev/null
 # ECR login
 aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS --password-stdin "$(echo "$ECR_REPO" | cut -d'/' -f1)"
 
-# Prepare build context
-BUILD_DIR=$(mktemp -d)
-cp app/index.html "$BUILD_DIR/"
-cp docker/nginx.conf "$BUILD_DIR/"
-cp Dockerfile "$BUILD_DIR/"
-cd "$BUILD_DIR"
-
 # Build and push image
 echo "🔹 Building Docker image..."
+# 👇 ensure the script runs from repo root (where Dockerfile exists)
+cd "$(dirname "$0")/../.."  # move from jenkins/scripts to repo root
+
 docker build -t "${ECR_REPO}:${IMAGE_TAG}" .
 
 echo "🔹 Pushing Docker image to ECR..."
