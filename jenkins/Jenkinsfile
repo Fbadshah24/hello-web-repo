@@ -70,7 +70,7 @@ pipeline {
             sh "aws eks update-kubeconfig --region ${AWS_DEFAULT_REGION} --name ${CLUSTER_NAME}"
           }
 
-          sh "sed -e 's|<ECR_REPOSITORY_URI>|${ECR_REPO}|g' k8s/deployment.yaml | sed -e 's|${IMAGE_TAG_PLACEHOLDER}|${IMAGE_TAG}|g' > k8s/deployment.generated.yaml"
+          sh "sed -e 's|<ECR_REPOSITORY_URI>|${ECR_REPO}|g' k8s/deployment.yaml | sed -e 's|\\$IMAGE_TAG_PLACEHOLDER|${IMAGE_TAG}|g' > k8s/deployment.generated.yaml"
           sh 'kubectl apply -f k8s/deployment.generated.yaml'
           sh 'kubectl apply -f k8s/service.yaml'
         }
