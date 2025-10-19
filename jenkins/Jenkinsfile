@@ -50,7 +50,7 @@ pipeline {
           env.IMAGE_TAG = IMAGE_TAG
 
           // Retrieve ECR repo URI from Terraform output
-          ECR_REPO = sh(returnStdout: true, script: "cd ${TF_DIR} && terraform output -raw ecr_repo_url").trim()
+          ECR_REPO = sh(returnStdout: true, script: "cd ${TF_DIR} && terraform output -raw ecr_repo_uri").trim()
           env.ECR_REPO = ECR_REPO
         }
 
