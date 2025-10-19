@@ -46,19 +46,20 @@ pipeline {
     stage('Build and Push Docker Image') {
       steps {
         script {
-          IMAGE_TAG = sh(returnStdout: true, script: 'git rev-parse --short HEAD').trim()
+          def IMAGE_TAG = sh(returnStdout: true, script: 'git rev-parse --short HEAD').trim()
           env.IMAGE_TAG = IMAGE_TAG
 
           // Retrieve ECR repo URI from Terraform output
-          ECR_REPO = sh(returnStdout: true, script: "cd ${TF_DIR} && terraform output -raw ecr_repo_uri").trim()
+          def ECR_REPO = sh(returnStdout: true, script: "cd ${TF_DIR} && terraform output -raw ecr_repo_uri").trim()
           env.ECR_REPO = ECR_REPO
         }
 
-        sh 'chmod +x jenkins/scripts/aws-ecr-login-and-push.sh'
-        sh "jenkins/scripts/aws-ecr-login-and-push.sh ${ECR_REPO} ${IMAGE_TAG}"
+        withCredentials([[$class: 'AmazonWebServicesCredentialsBinding', credentialsId: 'aws-credentials']]) {
+      sh 'chmod +x jenkins/scripts/aws-ecr-login-and-push.sh'
+      sh "jenkins/scripts/aws-ecr-login-and-push.sh ${AWS_ACCESS_KEY_ID} ${AWS_SECRET_ACCESS_KEY} ${AWS_DEFAULT_REGION} ${ECR_REPO} ${IMAGE_TAG}"
       }
     }
-
+  }
     stage('Deploy to Kubernetes (EKS)') {
       steps {
         script {
