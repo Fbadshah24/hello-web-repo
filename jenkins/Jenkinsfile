@@ -55,22 +55,25 @@ pipeline {
         }
 
         withCredentials([[$class: 'AmazonWebServicesCredentialsBinding', credentialsId: 'aws-credentials']]) {
-      sh 'chmod +x jenkins/scripts/aws-ecr-login-and-push.sh'
-      sh "jenkins/scripts/aws-ecr-login-and-push.sh ${AWS_ACCESS_KEY_ID} ${AWS_SECRET_ACCESS_KEY} ${AWS_DEFAULT_REGION} ${ECR_REPO} ${IMAGE_TAG}"
+          sh 'chmod +x jenkins/scripts/aws-ecr-login-and-push.sh'
+          sh "jenkins/scripts/aws-ecr-login-and-push.sh ${AWS_ACCESS_KEY_ID} ${AWS_SECRET_ACCESS_KEY} ${AWS_DEFAULT_REGION} ${ECR_REPO} ${IMAGE_TAG}"
+        }
       }
     }
-  }
+
     stage('Deploy to Kubernetes (EKS)') {
       steps {
-        script {
-          // Fetch kubeconfig dynamically using Terraform output (cluster name)
-          CLUSTER_NAME = sh(returnStdout: true, script: "cd ${TF_DIR} && terraform output -raw cluster_name").trim()
-          sh "aws eks update-kubeconfig --region ${AWS_DEFAULT_REGION} --name ${CLUSTER_NAME}"
-        }
+        withCredentials([[$class: 'AmazonWebServicesCredentialsBinding', credentialsId: 'aws-credentials']]) {
+          script {
+            // Fetch kubeconfig dynamically using Terraform output (cluster name)
+            def CLUSTER_NAME = sh(returnStdout: true, script: "cd ${TF_DIR} && terraform output -raw cluster_name").trim()
+            sh "aws eks update-kubeconfig --region ${AWS_DEFAULT_REGION} --name ${CLUSTER_NAME}"
+          }
 
-        sh "sed -e 's|<ECR_REPOSITORY_URI>|${ECR_REPO}|g' k8s/deployment.yaml | sed -e 's|${IMAGE_TAG_PLACEHOLDER}|${IMAGE_TAG}|g' > k8s/deployment.generated.yaml"
-        sh 'kubectl apply -f k8s/deployment.generated.yaml'
-        sh 'kubectl apply -f k8s/service.yaml'
+          sh "sed -e 's|<ECR_REPOSITORY_URI>|${ECR_REPO}|g' k8s/deployment.yaml | sed -e 's|${IMAGE_TAG_PLACEHOLDER}|${IMAGE_TAG}|g' > k8s/deployment.generated.yaml"
+          sh 'kubectl apply -f k8s/deployment.generated.yaml'
+          sh 'kubectl apply -f k8s/service.yaml'
+        }
       }
     }
   }
