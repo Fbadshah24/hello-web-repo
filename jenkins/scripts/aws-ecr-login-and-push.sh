@@ -26,7 +26,7 @@ aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --usern
 BUILD_DIR=$(mktemp -d)
 cp app/index.html "$BUILD_DIR/"
 cp docker/nginx.conf "$BUILD_DIR/"
-cp docker/Dockerfile "$BUILD_DIR/"
+cp Dockerfile "$BUILD_DIR/"
 cd "$BUILD_DIR"
 
 # Build and push image
